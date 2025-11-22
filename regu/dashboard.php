@@ -10,11 +10,11 @@ use Aws\S3\S3Client;
 use Aws\Exception\AwsException;
 use Dotenv\Dotenv;
 
-// Load Env
+// Load Environment Variables
 $dotenv = Dotenv::createImmutable(__DIR__ . '/../');
 $dotenv->safeLoad();
 
-// S3 Client
+// Inisialisasi S3 Client
 $s3 = new S3Client([
     'version'     => 'latest',
     'region'      => $_ENV['B2_REGION'],
@@ -43,11 +43,11 @@ $host = $_SERVER['HTTP_HOST'];
 $path = str_replace('/regu/dashboard.php', '', $_SERVER['PHP_SELF']); 
 $base_url = "$protocol://$host$path"; 
 
-// --- 3. HELPER ---
+// --- 3. HELPER & DATA ---
 $my_regu = $db->query("SELECT r.*, u.nama_sekolah, u.id as unit_id FROM regus r JOIN units u ON r.unit_id=u.id WHERE r.id=$regu_id")->fetch(PDO::FETCH_ASSOC);
 $unit_id = $my_regu['unit_id'];
 
-// Deteksi Kategori Folder
+// Deteksi Folder Upload
 $nama_sekolah = strtoupper($my_regu['nama_sekolah'] ?? '');
 $folder_kategori = 'LAINNYA';
 if (strpos($nama_sekolah, 'SMK') !== false) $folder_kategori = 'SMK';
@@ -67,6 +67,7 @@ function bulanIndo($bln){
 function uploadBuktiKeB2($file, $kategori) {
     global $s3;
     $ext = pathinfo($file['name'], PATHINFO_EXTENSION);
+    if(empty($ext)) $ext = 'jpg'; // Default ext jika dari blob
     $filename = time() . '_' . uniqid() . '.' . $ext;
     $keyName = "PROJECT-APPS-PRAMUKA/BUKTI-BAYAR/" . $kategori . "/" . $filename;
     try {
@@ -75,14 +76,22 @@ function uploadBuktiKeB2($file, $kategori) {
     } catch (Exception $e) { return null; }
 }
 
-function getSecureUrl($filename) {
+// [FIX] FUNGSI HYBRID: Bisa load gambar Lokal maupun Cloud
+function getImageUrl($filename) {
     global $s3;
-    try {
-        if (empty($filename)) return null;
-        $cmd = $s3->getCommand('GetObject', ['Bucket' => $_ENV['B2_BUCKET_NAME'], 'Key' => $filename]);
-        $request = $s3->createPresignedRequest($cmd, '+20 minutes');
-        return (string)$request->getUri();
-    } catch (Exception $e) { return null; }
+    if (empty($filename)) return null;
+
+    // Cek apakah ini file Cloud (Ada nama folder project kita)
+    if (strpos($filename, 'PROJECT-APPS-PRAMUKA') !== false) {
+        try {
+            $cmd = $s3->getCommand('GetObject', ['Bucket' => $_ENV['B2_BUCKET_NAME'], 'Key' => $filename]);
+            $request = $s3->createPresignedRequest($cmd, '+24 hours');
+            return (string)$request->getUri();
+        } catch (Exception $e) { return null; }
+    } else {
+        // Jika tidak, berarti file LAMA (Local Upload)
+        return "../assets/uploads/" . $filename;
+    }
 }
 
 function setFlash($type, $msg) { $_SESSION['flash'] = ['type' => $type, 'msg' => $msg]; }
@@ -123,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
             setFlash('success', 'Data anggota tersimpan!'); header("Location: ?page=members"); exit();
         }
-        // Lapor Bayar (MODIFIED FOR AJAX RESPONSE)
+        // Lapor Bayar (AJAX Support)
         elseif (isset($_POST['lapor_bayar'])) {
             $db->beginTransaction();
             $setting = $db->query("SELECT * FROM setting_iuran WHERE unit_id=$unit_id")->fetch(PDO::FETCH_ASSOC);
@@ -148,20 +157,20 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
             $db->commit();
 
-            // JIKA REQUEST DARI AJAX (JS)
+            // AJAX RESPONSE
             if(isset($_POST['is_ajax'])) {
+                header('Content-Type: application/json');
                 echo json_encode(['status' => 'success', 'message' => 'Laporan berhasil dikirim!']);
-                exit(); // Stop PHP execution agar tidak redirect manual
+                exit(); 
             }
 
-            // Fallback untuk non-js
             setFlash('success', "Laporan terkirim! Rp ".number_format($bayar)." disetor."); 
             header("Location: ?page=history"); exit();
         }
     } catch (Exception $e) { 
         if($db->inTransaction()) $db->rollBack(); 
-        
         if(isset($_POST['is_ajax'])) {
+            header('Content-Type: application/json');
             echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
             exit();
         }
@@ -183,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <style>
         body { background: #f4f7f6; font-family: 'Segoe UI', sans-serif; padding-bottom: 100px; }
         
-        /* UI Components */
+        /* Sidebar & UI */
         .sidebar { min-height: 100vh; width: 260px; background: #fff; position: fixed; top: 0; left: 0; z-index: 1000; border-right: 1px solid #eee; }
         .sidebar .brand { padding: 30px 25px; font-weight: 800; color: #2c3e50; font-size: 1.3rem; }
         .sidebar a { color: #7f8c8d; text-decoration: none; display: block; padding: 15px 25px; font-weight: 500; transition: 0.2s; border-left: 4px solid transparent; }
@@ -191,10 +200,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .main-content { margin-left: 260px; padding: 30px; }
         .card { border: none; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.03); background: #fff; overflow: hidden; transition: 0.2s; }
         .card-header { background: transparent; border-bottom: 1px solid #f0f0f0; font-weight: 700; padding: 15px 20px; }
+        
+        /* Rich Text Image Fix */
         .rich-text-content img { max-width: 100%; height: auto; border-radius: 8px; margin: 10px 0; }
         .highlight-post { border: 2px solid #3498db; }
         
-        /* Mobile & Navigation */
+        /* Mobile & FAB */
         .mobile-header, .bottom-nav { display: none; }
         @media (max-width: 768px) {
             .sidebar { display: none; }
@@ -212,9 +223,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         .kop-surat { display: none; }
         @media print { .sidebar, .bottom-nav, .mobile-header, .no-print { display: none !important; } .main-content { margin: 0 !important; } .kop-surat { display: flex !important; border-bottom: 3px double black; } .kop-logo { height: 80px; } }
 
-        /* SUCCESS CHECKMARK ANIMATION */
-        .success-animation { margin: 20px auto;}
-        .checkmark { width: 100px; height: 100px; border-radius: 50%; display: block; stroke-width: 2; stroke: #4bb71b; stroke-miterlimit: 10; box-shadow: inset 0px 0px 0px #4bb71b; animation: fill .4s ease-in-out .4s forwards, scale .3s ease-in-out .9s both; position: relative; top: 5px; right: 5px; margin: 0 auto; }
+        /* ANIMASI SUKSES */
+        .success-animation { margin: 20px auto; }
+        .checkmark { width: 80px; height: 80px; border-radius: 50%; display: block; stroke-width: 2; stroke: #4bb71b; stroke-miterlimit: 10; box-shadow: inset 0px 0px 0px #4bb71b; animation: fill .4s ease-in-out .4s forwards, scale .3s ease-in-out .9s both; position: relative; margin: 0 auto; }
         .checkmark__circle { stroke-dasharray: 166; stroke-dashoffset: 166; stroke-width: 2; stroke-miterlimit: 10; stroke: #4bb71b; fill: #fff; animation: stroke 0.6s cubic-bezier(0.65, 0, 0.45, 1) forwards; }
         .checkmark__check { transform-origin: 50% 50%; stroke-dasharray: 48; stroke-dashoffset: 48; animation: stroke 0.3s cubic-bezier(0.65, 0, 0.45, 1) 0.8s forwards; }
         @keyframes stroke { 100% { stroke-dashoffset: 0; } }
@@ -250,18 +261,60 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     <?php endif; ?>
 
     <?php switch ($page) {
-        // (CASE HOME, MEMBERS SAMA SEPERTI SEBELUMNYA - DISINGKAT AGAR MUAT)
-        case 'home': /* ...Code Home... */ 
+        // 1. HOME / FEED
+        case 'home': 
              $infos = $db->query("SELECT * FROM pengumuman WHERE tujuan_role IN ('semua','regu') OR (tujuan_role='unit' AND user_id=(SELECT id FROM users WHERE related_id=$unit_id AND role='unit')) ORDER BY tanggal DESC"); ?>
              <h5 class="mb-4 fw-bold text-secondary no-print ps-1">Papan Pengumuman</h5>
              <div class="row"><?php while($info=$infos->fetch(PDO::FETCH_ASSOC)): 
-                $p_id = $info['id']; $db->prepare("INSERT IGNORE INTO pengumuman_views (pengumuman_id, user_id, viewed_at) VALUES (?, ?, NOW())")->execute([$p_id, $user_id]); 
-                $secureFeedImage = $info['gambar'] ? getSecureUrl($info['gambar']) : ''; ?>
-                <div class="col-md-8 mx-auto"><div class="card mb-4 p-3 shadow-sm">
-                    <h6 class="fw-bold mb-1"><?= $info['judul'] ?></h6><small class="text-muted d-block mb-2"><?= date('d M H:i', strtotime($info['tanggal'])) ?></small>
-                    <div class="rich-text-content small"><?= $info['isi'] ?></div>
-                    <?php if($secureFeedImage): ?><img src="<?= $secureFeedImage ?>" class="img-fluid rounded mt-2" style="max-height:300px; object-fit:cover"><?php endif; ?>
-                    <hr><a href="<?= $base_url ?>post.php?id=<?= $p_id ?>" class="btn btn-light btn-sm w-100 rounded-pill text-primary">Lihat & Share <i class="fas fa-share"></i></a>
+                $p_id = $info['id']; 
+                $db->prepare("INSERT IGNORE INTO pengumuman_views (pengumuman_id, user_id, viewed_at) VALUES (?, ?, NOW())")->execute([$p_id, $user_id]); 
+                
+                // [FIXED] Gunakan fungsi Hybrid (bisa lokal/cloud)
+                $secureFeedImage = $info['gambar'] ? getImageUrl($info['gambar']) : ''; 
+                
+                // Hitung React
+                $countLike = $db->query("SELECT COUNT(*) FROM pengumuman_reactions WHERE pengumuman_id=$p_id AND reaction_type='like'")->fetchColumn();
+                $countLove = $db->query("SELECT COUNT(*) FROM pengumuman_reactions WHERE pengumuman_id=$p_id AND reaction_type='love'")->fetchColumn();
+                $myReaction = $db->query("SELECT reaction_type FROM pengumuman_reactions WHERE pengumuman_id=$p_id AND user_id=$user_id")->fetchColumn();
+                
+                $shareLink = $base_url . "/post.php?id=" . $p_id;
+                $shareText = "*INFO PRAMUKA*\n" . $info['judul'] . "\n\nSelengkapnya: " . $shareLink;
+            ?>
+                <div class="col-md-8 mx-auto"><div class="card mb-4 p-3 shadow-sm" id="post-<?= $p_id ?>">
+                    <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-2">
+                        <h6 class="fw-bold mb-0 text-dark"><?= htmlspecialchars($info['judul']) ?></h6>
+                        <small class="text-muted" style="font-size: 11px;"><?= date('d M H:i', strtotime($info['tanggal'])) ?></small>
+                    </div>
+                    
+                    <div class="rich-text-content small mb-3">
+                        <?= $info['isi'] ?>
+                    </div>
+                    
+                    <?php if($secureFeedImage): ?>
+                        <img src="<?= $secureFeedImage ?>" class="img-fluid rounded w-100 shadow-sm mb-3" style="max-height:350px; object-fit:cover">
+                    <?php endif; ?>
+
+                    <div class="d-flex justify-content-between align-items-center pt-2 border-top">
+                        <div>
+                             <form method="POST" class="d-inline">
+                                <input type="hidden" name="toggle_reaction" value="1">
+                                <input type="hidden" name="pengumuman_id" value="<?= $p_id ?>">
+                                <input type="hidden" name="reaction_type" value="like">
+                                <button class="btn btn-sm btn-light rounded-pill text-primary border <?= $myReaction=='like'?'active':'' ?>">
+                                    <i class="<?= $myReaction=='like'?'fas':'far' ?> fa-thumbs-up"></i> <?= $countLike?:'' ?>
+                                </button>
+                            </form>
+                            <form method="POST" class="d-inline">
+                                <input type="hidden" name="toggle_reaction" value="1">
+                                <input type="hidden" name="pengumuman_id" value="<?= $p_id ?>">
+                                <input type="hidden" name="reaction_type" value="love">
+                                <button class="btn btn-sm btn-light rounded-pill text-danger border <?= $myReaction=='love'?'active':'' ?>">
+                                    <i class="<?= $myReaction=='love'?'fas':'far' ?> fa-heart"></i> <?= $countLove?:'' ?>
+                                </button>
+                            </form>
+                        </div>
+                        <a href="https://wa.me/?text=<?= urlencode($shareText) ?>" target="_blank" class="btn btn-success btn-sm rounded-pill px-3"><i class="fab fa-whatsapp"></i> Share</a>
+                    </div>
                 </div></div>
              <?php endwhile; ?></div>
         <?php break;
@@ -276,9 +329,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
              </div>
         <?php break;
 
-        // ==========================
-        // 3. LAPOR IURAN (OPTIMIZED WITH AJAX)
-        // ==========================
         case 'lapor':
             $anggota = $db->query("SELECT * FROM anggota_regu WHERE regu_id=$regu_id");
         ?>
@@ -290,29 +340,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 <div class="bg-primary bg-opacity-10 text-primary rounded-circle d-inline-flex p-3 mb-2"><i class="fas fa-camera fa-2x"></i></div>
                                 <h5 class="fw-bold text-dark">Lapor Iuran / Kas</h5>
                             </div>
-                            
                             <form id="formLapor" enctype="multipart/form-data">
                                 <input type="hidden" name="lapor_bayar" value="1">
-                                <input type="hidden" name="is_ajax" value="1"> <div class="mb-3">
-                                    <label class="form-label small fw-bold text-muted">Nama Anggota</label>
-                                    <select name="anggota_id" class="form-select form-select-lg bg-light border-0" required>
-                                        <option value="">Pilih Anggota...</option>
-                                        <?php while($m=$anggota->fetch(PDO::FETCH_ASSOC)): ?><option value="<?= $m['id'] ?>"><?= $m['nama_anggota'] ?></option><?php endwhile; ?>
-                                    </select>
-                                </div>
-                                <div class="mb-3">
-                                    <label class="form-label small fw-bold text-muted">Bukti Foto</label>
-                                    <input type="file" id="fileInput" name="bukti" class="form-control" accept="image/*" capture="environment" required>
-                                    <div class="form-text small text-primary" id="compressInfo">Foto akan otomatis diperkecil agar cepat.</div>
-                                </div>
-                                <div class="mb-4">
-                                    <label class="form-label small fw-bold text-muted">Nominal (Rp)</label>
-                                    <input type="number" name="nominal_bayar" class="form-control form-control-lg bg-light border-0 fw-bold text-primary" placeholder="0" required>
-                                </div>
-                                <button type="submit" id="btnSubmit" class="btn btn-primary w-100 btn-lg rounded-pill fw-bold shadow-sm">
-                                    <span id="btnText">KIRIM LAPORAN <i class="fas fa-paper-plane ms-2"></i></span>
-                                    <span id="btnLoad" class="spinner-border spinner-border-sm d-none"></span>
-                                </button>
+                                <input type="hidden" name="is_ajax" value="1">
+                                <div class="mb-3"><label class="form-label small fw-bold text-muted">Nama Anggota</label><select name="anggota_id" class="form-select form-select-lg bg-light border-0" required><option value="">Pilih...</option><?php while($m=$anggota->fetch(PDO::FETCH_ASSOC)): ?><option value="<?= $m['id'] ?>"><?= $m['nama_anggota'] ?></option><?php endwhile; ?></select></div>
+                                <div class="mb-3"><label class="form-label small fw-bold text-muted">Bukti Foto</label><input type="file" id="fileInput" name="bukti" class="form-control" accept="image/*" capture="environment" required><div class="form-text small text-primary" id="compressInfo">Foto akan otomatis dikompresi (lebih cepat).</div></div>
+                                <div class="mb-4"><label class="form-label small fw-bold text-muted">Nominal (Rp)</label><input type="number" name="nominal_bayar" class="form-control form-control-lg bg-light border-0 fw-bold text-primary" placeholder="0" required></div>
+                                <button type="submit" id="btnSubmit" class="btn btn-primary w-100 btn-lg rounded-pill fw-bold shadow-sm"><span id="btnText">KIRIM LAPORAN <i class="fas fa-paper-plane ms-2"></i></span><span id="btnLoad" class="spinner-border spinner-border-sm d-none"></span></button>
                             </form>
                         </div>
                     </div>
@@ -320,15 +354,19 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             </div>
         <?php break;
 
-        // 4. HISTORY (Simplified)
         case 'history': 
             $histori = $db->query("SELECT t.*, a.nama_anggota FROM transaksi_iuran t JOIN anggota_regu a ON t.anggota_id=a.id WHERE t.unit_id=$unit_id ORDER BY t.id DESC LIMIT 20");
             echo "<h5 class='mb-3 ps-1'>Riwayat</h5><div class='card border-0 shadow-sm'><div class='list-group list-group-flush'>";
             while($h=$histori->fetch(PDO::FETCH_ASSOC)){
-                $url = $h['bukti_foto'] ? getSecureUrl($h['bukti_foto']) : '';
+                // [FIXED] Gunakan fungsi Hybrid untuk bukti
+                $url = $h['bukti_foto'] ? getImageUrl($h['bukti_foto']) : '';
+                
+                // Escape URL untuk JS
+                $jsUrl = htmlspecialchars($url, ENT_QUOTES);
+
                 echo "<div class='list-group-item p-3'><div class='d-flex justify-content-between'><div><h6 class='fw-bold mb-0'>{$h['nama_anggota']}</h6><small class='text-muted'>".date('d/m H:i',strtotime($h['tanggal_bayar']))."</small></div>";
                 echo "<div class='text-end'><span class='badge bg-".($h['status']=='lunas'?'success':'warning')." rounded-pill'>".strtoupper($h['status'])."</span>";
-                if($url) echo "<br><button onclick=\"showBuktiModal('$url', '{$h['nama_anggota']}')\" class='btn btn-sm btn-outline-primary py-0 px-2 mt-1' style='font-size:10px'>Bukti</button>";
+                if($url) echo "<br><button onclick=\"showBuktiModal('$jsUrl', '{$h['nama_anggota']}')\" class='btn btn-sm btn-outline-primary py-0 px-2 mt-1' style='font-size:10px'>Bukti</button>";
                 echo "</div></div></div>";
             }
             echo "</div></div>";
@@ -344,7 +382,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             <svg class="checkmark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 52 52"><circle class="checkmark__circle" cx="26" cy="26" r="25" fill="none" /><path class="checkmark__check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8" /></svg>
         </div>
         <h4 class="fw-bold mt-3">Berhasil!</h4>
-        <p class="text-muted">Laporan telah terkirim ke Unit.</p>
+        <p class="text-muted mb-0">Laporan dikirim ke Unit.</p>
       </div>
     </div>
   </div>
@@ -362,62 +400,45 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-// Show Bukti Image
 function showBuktiModal(url, nama) {
     document.getElementById('imgPreview').src = url;
     new bootstrap.Modal(document.getElementById('modalBukti')).show();
 }
 
-// --- LOGIKA UTAMA UPLOAD CEPAT ---
 document.addEventListener("DOMContentLoaded", function() {
     const form = document.getElementById('formLapor');
     if (form) {
         form.addEventListener('submit', async function(e) {
-            e.preventDefault(); // Stop reload biasa
-            
+            e.preventDefault();
             const btn = document.getElementById('btnSubmit');
             const btnText = document.getElementById('btnText');
             const btnLoad = document.getElementById('btnLoad');
             const fileInput = document.getElementById('fileInput');
 
-            // 1. UI Loading State
             btn.disabled = true;
             btnText.classList.add('d-none');
             btnLoad.classList.remove('d-none');
 
-            // 2. Persiapkan Data
             const formData = new FormData(form);
             
-            // 3. Kompresi Gambar (Client-side) - Jika ada file
             if (fileInput.files.length > 0) {
                 const compressedFile = await compressImage(fileInput.files[0]);
                 formData.set('bukti', compressedFile, compressedFile.name);
             }
 
-            // 4. Kirim AJAX
             try {
-                const response = await fetch('', {
-                    method: 'POST',
-                    body: formData
-                });
+                const response = await fetch('', { method: 'POST', body: formData });
                 const result = await response.json();
-
                 if (result.status === 'success') {
-                    // Tampilkan Modal Sukses
-                    const successModal = new bootstrap.Modal(document.getElementById('successModal'));
-                    successModal.show();
-                    
-                    // Redirect setelah 2 detik
-                    setTimeout(() => {
-                        window.location.href = '?page=history';
-                    }, 1800);
+                    new bootstrap.Modal(document.getElementById('successModal')).show();
+                    setTimeout(() => { window.location.href = '?page=history'; }, 1800);
                 } else {
                     alert('Gagal: ' + result.message);
                     resetBtn();
                 }
             } catch (error) {
                 console.error(error);
-                alert('Terjadi kesalahan jaringan.');
+                alert('Gagal kirim. Cek koneksi.');
                 resetBtn();
             }
         });
@@ -429,7 +450,6 @@ document.addEventListener("DOMContentLoaded", function() {
         document.getElementById('btnLoad').classList.add('d-none');
     }
 
-    // Fungsi Kompresi Gambar (Max width 1000px, Quality 0.7)
     function compressImage(file) {
         return new Promise((resolve) => {
             const reader = new FileReader();
@@ -439,18 +459,15 @@ document.addEventListener("DOMContentLoaded", function() {
                 img.src = event.target.result;
                 img.onload = () => {
                     const canvas = document.createElement('canvas');
-                    const MAX_WIDTH = 1000; 
+                    const MAX_WIDTH = 800; 
                     const scaleSize = MAX_WIDTH / img.width;
                     canvas.width = (img.width > MAX_WIDTH) ? MAX_WIDTH : img.width;
                     canvas.height = (img.width > MAX_WIDTH) ? (img.height * scaleSize) : img.height;
-                    
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
                     canvas.toBlob((blob) => {
-                        // Buat file baru dari blob (kompresi)
                         resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
-                    }, 'image/jpeg', 0.7); // Kualitas 70%
+                    }, 'image/jpeg', 0.6);
                 }
             }
         });
