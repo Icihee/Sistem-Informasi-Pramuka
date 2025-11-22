@@ -56,7 +56,7 @@ function getSecureUrl($filename) {
     try {
         if (empty($filename)) return null;
         $cmd = $s3->getCommand('GetObject', ['Bucket' => $_ENV['B2_BUCKET_NAME'], 'Key' => $filename]);
-        $request = $s3->createPresignedRequest($cmd, '+20 minutes');
+        $request = $s3->createPresignedRequest($cmd, '+24 hours');
         return (string)$request->getUri();
     } catch (Exception $e) { return null; }
 }
