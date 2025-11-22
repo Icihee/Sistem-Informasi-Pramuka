@@ -121,3 +121,40 @@ Akses `panduan.php` untuk panduan digital.
 ## 📄 Lisensi
 
 Proyek ini bebas digunakan untuk edukasi dan pengembangan.
+
+
+## 📸 Screenshot
+
+### Panel Induk Utama
+<img width="1919" height="906" alt="Panel Induk Utama" src="https://github.com/user-attachments/assets/caad5fc9-f273-404d-8059-300cd4760437" />
+
+### Pengelolaan Unit di Panel Induk Utama
+<img width="1926" height="684" alt="Pengelolaan Unit" src="https://github.com/user-attachments/assets/a8f0d5ab-9ee2-44cb-b421-fe840bff7156" />
+
+### Panel Unit 
+<img width="1907" height="768" alt="image" src="https://github.com/user-attachments/assets/dafd90db-7a62-4c06-9dd9-bdedc0af0b86" />
+
+### Panel Regu 
+<img width="1907" height="840" alt="image" src="https://github.com/user-attachments/assets/eabaed8c-93b9-4dbe-8d64-1cb642f4a0e5" />
+
+
+---
+
+## 🌐 Online Demo
+https://demo.pramuka.fastrs.id
+
+## 🔑 Demo Users (Untuk Online Demo)
+
+### 🏢 Super Admin
+**Username:** superadmin  
+**Password:** 12345678
+
+### 🏫 Unit (Admin Sekolah)
+**Username:** unit  
+**Password:** 12345678
+
+### ⛺ Regu (Ketua Regu)
+**Username:** regu  
+**Password:** 12345678
+
+
